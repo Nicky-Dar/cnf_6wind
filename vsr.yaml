@@ -1,0 +1,157 @@
+apiVersion: policy/v1beta1
+kind: PodSecurityPolicy
+metadata:
+  name: 6windgate-sysctl
+spec:
+  seLinux:
+    rule: RunAsAny
+  runAsUser:
+    rule: RunAsAny
+  fsGroup:
+    rule: RunAsAny
+  supplementalGroups:
+    rule: RunAsAny
+  volumes:
+  - '*'
+  allowedUnsafeSysctls:
+  - net.*
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: 6windgate-role
+rules:
+  - apiGroups: ['policy']
+    resources: ['podsecuritypolicies']
+    verbs: ['use']
+    resourceNames: ['6windgate-sysctl']
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: 6windgate-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: 6windgate-role
+subjects:
+- kind: ServiceAccount
+  name: 6windgate-user
+  namespace: default
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: 6windgate-user
+  namespace: default
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: vsr
+  name: vsr
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fastpath
+  template:
+    metadata:
+      labels:
+        app: fastpath
+      annotations:
+         k8s.v1.cni.cncf.io/networks: flannel, flannel
+    spec:
+      restartPolicy: Always
+      serviceAccountName: 6windgate-user
+      securityContext:
+        sysctls:
+        - name: net.ipv4.conf.default.disable_policy
+          value: "1"
+        - name: net.ipv4.ip_local_port_range
+          value: "30000 40000"
+        - name: net.ipv4.ip_forward
+          value: "1"
+        - name: net.ipv6.conf.all.forwarding
+          value: "1"
+      containers:
+      - image: download.6wind.com/vsr/x86_64-ce/3.5:3.5.1
+        imagePullPolicy: IfNotPresent
+        name: vsr
+        resources:
+          limits:
+            cpu: "4"
+            memory: "2Gi"
+        resources:
+          limits:
+            cpu: "4"
+            memory: "2Gi"
+            hugepages-1Gi: 8Gi
+            intel.com/intel_sriov_nic_vsr1: '1'
+            intel.com/intel_sriov_nic_vsr2: '1'
+          requests:
+            cpu: "4"
+            memory: "2Gi"
+            hugepages-1Gi: 8Gi
+            intel.com/intel_sriov_nic_vsr1: '1'
+            intel.com/intel_sriov_nic_vsr2: '1'
+
+        env:
+        securityContext:
+          capabilities:
+            add: ["NET_ADMIN", "SYS_ADMIN", "SYS_NICE", "IPC_LOCK", "NET_BROADCAST", "AUDIT_WRITE"]
+        volumeMounts:
+        - mountPath: /dev/hugepages
+          name: hugepage
+        - mountPath: /dev/shm
+          name: shm
+        - mountPath: /dev/net/tun
+          name: net
+        - mountPath: /dev/ppp
+          name: ppp
+        - mountPath: /sys/fs/cgroup
+          name: cgroup
+        - mountPath: /tmp
+          name: tmp
+        - mountPath: /run
+          name: run
+        - mountPath: /run/lock
+          name: run-lock
+        stdin: true
+        tty: true
+      imagePullSecrets:
+      - name: regcred
+      volumes:
+      - emptyDir:
+          medium: HugePages
+          sizeLimit: 8Gi
+        name: hugepage
+      - name: shm
+        emptyDir:
+          sizeLimit: "512Mi"
+          medium: "Memory"
+      - hostPath:
+          path: /dev/net/tun
+          type: ""
+        name: net
+      - hostPath:
+          path: /dev/ppp
+          type: ""
+        name: ppp
+      - hostPath:
+          path: /sys/fs/cgroup
+          type: ""
+        name: cgroup
+      - emptyDir:
+          sizeLimit: "200Mi"
+          medium: "Memory"
+        name: tmp
+      - emptyDir:
+          sizeLimit: "200Mi"
+          medium: "Memory"
+        name: run
+      - emptyDir:
+          sizeLimit: "200Mi"
+          medium: "Memory"
+        name: run-lock
